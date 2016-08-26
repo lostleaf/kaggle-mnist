@@ -22,37 +22,58 @@ def symbol_lenet():
 
     net = mx.sym.FullyConnected(data=net, num_hidden=512)
     net = mx.sym.Activation(data=net, act_type="relu")
+    net = mx.sym.Dropout(data=net, p=0.5)
 
     net = mx.sym.FullyConnected(data=net, num_hidden=10)
     net = mx.sym.SoftmaxOutput(data=net, name="softmax")
     return net
 
-def main():
+def get_data():
     train_dataset = np.load("train.npz")
     train_data = train_dataset["train_data"]
     train_labels = train_dataset["train_labels"]
     train_data = train_data.reshape((-1, 1, 28, 28))
+    test_data = np.load("test.npy")
+    test_data = test_data.reshape((-1, 1, 28, 28))
+    return train_data, train_labels, test_data
+
+def init(arg_dict):
+    uniform_init = mx.init.Uniform(scale=0.01)
+    for name, arg in arg_dict.iteritems():
+        if "weight" in name:
+            uniform_init(name, arg)
+        if "bias" in name:
+            arg[:] = 0
+
+def main():
+    train_data, train_labels, test_data = get_data()
 
     p = np.random.permutation(train_data.shape[0])
     train_data = train_data[p]
     train_labels = train_labels[p]
 
-    net = symbol_lenet()
-    print net.list_arguments()
-    
     train_iter = mx.io.NDArrayIter(train_data[:40000], train_labels[:40000], batch_size=BATCH_SIZE)
     val_iter = mx.io.NDArrayIter(train_data[40000:], train_labels[40000:], batch_size=BATCH_SIZE)
 
-    model = mx.model.FeedForward(ctx=mx.gpu(0), 
-                                 symbol=net, 
-                                 num_epoch=200, 
-                                 learning_rate=1e-4, 
-                                 momentum=0.9, 
-                                 wd=1e-5)
-    
-    model.fit(X=train_iter,
-              eval_data=val_iter,
-              batch_end_callback = mx.callback.Speedometer(BATCH_SIZE, 625))
+    net = symbol_lenet()
+    data_shape = (BATCH_SIZE, 1, 28, 28)
+    exe = net.simple_bind(ctx=mx.gpu(0), data=data_shape)
+
+    arg_dict = exe.arg_dict
+    grad_dict = exe.grad_dict
+    aux_dict = exe.aux_dict
+    output = exe.outputs[0]
+
+    init(arg_dict)
+
+    optimizer = mx.optimizer.Adam(learning_rate=1e-4)
+    updater = mx.optimizer.get_updater(optimizer)
+
+    for epoch in xrange(100):
+        print "Epoch:", epoch
+
+        train_iter.reset()
+        val_iter.reset()
 
 if __name__ == "__main__":
     main()
