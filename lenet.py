@@ -3,6 +3,8 @@ import numpy as np
 import logging
 import matplotlib.pyplot as plt
 
+from itertools import izip
+
 BATCH_SIZE = 64
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
@@ -57,23 +59,46 @@ def main():
 
     net = symbol_lenet()
     data_shape = (BATCH_SIZE, 1, 28, 28)
-    exe = net.simple_bind(ctx=mx.gpu(0), data=data_shape)
+    exe = net.simple_bind(ctx=mx.cpu(0), data=data_shape)
 
-    arg_dict = exe.arg_dict
-    grad_dict = exe.grad_dict
-    aux_dict = exe.aux_dict
-    output = exe.outputs[0]
-
-    init(arg_dict)
+    init(exe.arg_dict)
 
     optimizer = mx.optimizer.Adam(learning_rate=1e-4)
     updater = mx.optimizer.get_updater(optimizer)
+
+    accuracy = mx.metric.Accuracy()
+
+    data = exe.arg_dict["data"]
+    label = exe.arg_dict["softmax_label"]
 
     for epoch in xrange(100):
         print "Epoch:", epoch
 
         train_iter.reset()
+        accuracy.reset()
+
+        for idx_iter, batch in enumerate(train_iter):
+            data[:] = batch.data[0]
+            label[:] = batch.label[0]
+
+            exe.forward(is_train=True)
+            exe.backward()
+
+            for idx, (weight, grad) in enumerate(izip(exe.arg_arrays, exe.grad_arrays)):
+                updater(idx, grad, weight)
+
+            accuracy.update(batch.label, exe.outputs)
+            if idx_iter % 10 == 0:
+                print "Iteration: ", idx_iter, "Train accuracy: ", accuracy.get()[1]
+
         val_iter.reset()
+        accuracy.reset()
+
+        for idx_iter, batch in enumerate(val_iter):
+            data[:] = batch.data[0]
+            label[:] = batch.label[0]
+
+            exe.forward(is_train=False)
 
 if __name__ == "__main__":
     main()
